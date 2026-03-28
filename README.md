@@ -21,6 +21,7 @@ Over **30 open GitHub issues** document unexplained token waste, security concer
 | 4 | [Tool Serialization & Cache Stability](./reports/tool-serialization-cache-stability/) | The 4-stage tool pipeline, why there is zero `.sort()` on tool arrays, how deferred tool loading silently busts the cache mid-conversation, and MCP tool description dynamism as a hidden instability source. |
 | 5 | [Context Lifecycle Management](./reports/context-lifecycle-management/) | How Claude Code decides when to compress context — 5 hardcoded threshold constants, the 10-step compaction flow, preserved message segments, the `currentDate` daily cache-kill problem, and compact chain reactions that compound cache rebuild costs. |
 | 6 | [Production Cache Optimization](./reports/production-cache-optimization/) | Concrete, tested patches and strategies for maximizing prompt cache efficiency — 3 cli.js patches (context margin, 1h TTL force, compaction threshold), cache keepalive, tool ordering stabilization, efficiency monitoring, and the postinstall patch delivery pattern. |
+| 7 | [Cache Invalidation Verification](./reports/cache-invalidation-verification/) | Why MCP tool discovery via ToolSearch doesn't bust the prompt cache — the `defer_loading` flag excludes deferred tools from the cache prefix entirely. Verified through source code, official docs, GitHub issues, and live experiment. Includes complete cache breakpoint map, three system prompt cache strategies, and a practical scenario guide for every operation that does or doesn't invalidate cache. |
 
 ## Related Issues
 
@@ -43,7 +44,7 @@ Over **30 open GitHub issues** document unexplained token waste, security concer
 
 ## SDK Version Baseline
 
-Reports #1–2 are based on `@anthropic-ai/claude-code` v2.1.71. Reports #3–6 are based on `@anthropic-ai/claude-agent-sdk` v0.2.76 (cli.js build 2026-03-14). Findings may change with future SDK updates.
+Reports #1–2 are based on `@anthropic-ai/claude-code` v2.1.71. Reports #3–6 are based on `@anthropic-ai/claude-agent-sdk` v0.2.76 (cli.js build 2026-03-14). Report #7 is based on `@anthropic-ai/claude-code` v2.1.85 (cli.js build 2026-03-26). Findings may change with future SDK updates.
 
 ## How to Cite
 

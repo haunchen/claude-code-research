@@ -8,6 +8,8 @@ This report traces the full pipeline from tool list construction to API serializ
 
 Analysis based on reverse-engineering `cli.js` build `2026-03-14`, bundled in `@anthropic-ai/claude-agent-sdk` v0.2.76.
 
+> **Correction (2026-03-28):** The original version of this report stated that deferred MCP tool loading causes "guaranteed cache misses." Subsequent investigation of CLI v2.1.85, official Anthropic documentation, and the `defer_loading` API constraint has established that **deferred tools are excluded from the cache prefix entirely** — the server does not include `defer_loading: true` tools in the prefix calculation, so discovering them does not invalidate the cache. The analysis of the client-side discovery scanner and tools array rebuilding below remains accurate, but its conclusion about cache impact was wrong. See [Report #7: Cache Invalidation Verification](../cache-invalidation-verification/) for the full evidence chain.
+
 ---
 
 ## How the Tool List Gets Built
@@ -91,7 +93,7 @@ When a session starts, MCP tools are not included in the `tools` array at all. I
 
 When Claude decides it needs a deferred tool, a search step runs that loads the full schema. At that point, the `tools` array gains a new entry with the complete `{name, description, input_schema}` object.
 
-**The first invocation of any MCP tool in a conversation is a guaranteed cache miss.** The `tools` array before the call is structurally different from the `tools` array after. The cache prefix has changed. There is no way around this.
+~~**The first invocation of any MCP tool in a conversation is a guaranteed cache miss.**~~ **(Corrected — see note above.)** The `tools` array on the client side does change, but tools marked with `defer_loading: true` are excluded from the server-side cache prefix calculation. The Anthropic API explicitly forbids `defer_loading` and `cache_control` on the same tool ([Issue #30920](https://github.com/anthropics/claude-code/issues/30920)), confirming that deferred tools do not participate in caching. See [Report #7](../cache-invalidation-verification/) for full evidence.
 
 ### How It Works Internally: The Discovery Scanner
 
@@ -245,9 +247,9 @@ The gap between these two scenarios is the cost of MCP tool integration that no 
 
 ## What About Skills? A Common Misconception
 
-A natural question: if MCP tool loading busts the cache, does loading a Skill (slash command) cause the same problem?
+A natural question: if MCP tool loading changes the tools array, does loading a Skill (slash command) cause the same change?
 
-No. The mechanisms are entirely different.
+No. The mechanisms are entirely different. And as established in the correction above, neither one actually busts the cache — but for different reasons.
 
 When a Skill is invoked, Claude Code does two things: the Skill tool returns the skill content as a normal `tool_result` at the current turn position, and an `invoked_skills` attachment is created to record the loaded skill for session resume. Both of these are **appended to the end of the messages array** — the Skill content enters the conversation at the current turn position, not retroactively inserted into an earlier part of the prefix.
 
@@ -256,11 +258,11 @@ The discovery scanner (`zF` in source) that drives the deferred tool loading mec
 | | MCP Tool (via ToolSearch) | Skill (via Skill tool) |
 |---|---|---|
 | What changes | `tools` array (early in the prefix) | Messages array (appended at current turn) |
-| Cache impact on prior turns | **Full invalidation** — tools prefix shift breaks everything after | **None** — new content is at the end, prior prefix is unchanged |
-| Mechanism | `tool_reference` block → discovery scanner → tools array rebuild | `tool_result` + `invoked_skills` attachment → messages append |
-| Cost per first use | Full cache rebuild (125% of entire conversation) | Near zero (only the new content is a cache write) |
+| Cache impact on prior turns | **None** — deferred tools excluded from server-side prefix (see correction above) | **None** — new content is at the end, prior prefix is unchanged |
+| Mechanism | `tool_reference` block → discovery scanner → tools array rebuild (client-side only; server ignores `defer_loading` tools in prefix) | `tool_result` + `invoked_skills` attachment → messages append |
+| Cost per first use | Near zero (deferred tools excluded from prefix calculation) | Near zero (only the new content is a cache write) |
 
-If you are choosing between implementing functionality as an MCP tool or as a Skill, and cache efficiency matters, this distinction is worth considering. Skills are cache-neutral; MCP tools carry a one-time cache rebuild penalty per unique tool per conversation.
+Both MCP tools (via deferred loading) and Skills are effectively cache-neutral. The original distinction drawn here — that MCP tools cost a full cache rebuild — was incorrect. See [Report #7](../cache-invalidation-verification/) for the complete analysis.
 
 ---
 
