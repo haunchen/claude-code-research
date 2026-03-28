@@ -474,77 +474,94 @@ The embedded documentation that says "adding a tool invalidates the entire cache
 
 ## 7. What Actually Does Bust Cache — A Practical Scenario Guide
 
-Not all cache invalidations are created equal. Some destroy the entire prefix. Some only affect the messages layer. Here's a complete map based on CLI v2.1.85 source code analysis.
+The prompt cache is a stack of three layers: tools at the bottom, system prompt in the middle, messages on top. When a layer changes, everything above it gets rewritten. A change in the tools layer is the worst case — it forces the entire stack to rebuild. A change in the system prompt is slightly better — tools stay cached but everything else rebuilds. A change in messages is the mildest — just the new content gets written.
 
-### Full prefix invalidation (tools + system + all messages rebuilt)
+Here's every common scenario, organized by how much damage it does.
 
-| Scenario | Why it busts | Cost at 200k context | Evidence |
-|----------|-------------|---------------------|----------|
-| **Adding a non-deferred tool** | Tools prefix changes at position 0 | ~$3.75 (125% write) | Embedded docs |
-| **MCP server restart with different tool descriptions** | Tool schema bytes change | ~$3.75 | Tool serialization analysis |
-| **Model switch mid-conversation** | Cache key includes model ID | ~$3.75 | API design |
-| **Switching from standard to tool-search mode** | Tools array composition changes (ToolSearch added, deferred tools removed) | ~$3.75 | Source code |
-| **CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS toggle** | Strips non-standard fields from tool schemas, changing bytes | ~$3.75 | vm8() beta stripping logic |
+### The expensive ones: your entire conversation gets rewritten
 
-### System prompt invalidation (system + messages rebuilt, tools cached)
+These change the tools layer (position 0 in the cache), so every token in the request — tools, system prompt, and all messages — gets treated as new content and written to cache at the elevated write rate.
 
-| Scenario | Why it busts | Cost at 200k context | Evidence |
-|----------|-------------|---------------------|----------|
-| **Date rollover (currentDate change)** | Dynamic zone content changes | ~$3.00 (system + messages only) | System prompt analysis |
-| **CLAUDE.md edit during conversation** | System prompt content changes | ~$3.00 | System prompt rebuild |
-| **Git status change between turns** | Dynamic zone includes git info | ~$3.00 | System prompt analysis |
-| **First non-deferred MCP tool appears** | Triggers tool-based cache strategy switch (global → org scope) | ~$3.00 | Z57() branch logic |
+**When does this happen?**
 
-### Messages-only invalidation (only new messages not cached)
+- **You switch models mid-conversation.** The cache key includes the model name. Switch from Sonnet to Opus, and the server sees an entirely new request.
 
-| Scenario | Why it busts | Cost | Evidence |
-|----------|-------------|------|----------|
-| **Normal conversation turn** | New message added, breakpoint slides forward | Minimal (only new content written) | kVY() sliding window |
-| **Tool result content** | Tool outputs become part of messages | Proportional to output size | Normal operation |
+- **An MCP server restarts and its tool descriptions change.** Each tool's schema is serialized byte-for-byte. If your MCP server includes a timestamp, a record count, or anything dynamic in its tool descriptions, the schema changes between turns. One byte is enough.
 
-### Full context rebuild (everything reprocessed)
+- **You toggle `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`.** This strips non-standard fields (like `defer_loading`, `eager_input_streaming`) from tool schemas. The serialized bytes change, prefix invalidated.
 
-| Scenario | Why it busts | Cost at 200k context | Evidence |
-|----------|-------------|---------------------|----------|
-| **Context compaction (auto-compact)** | Messages rewritten by summarization, prefix changes | ~$3.75 + chain reaction risk | Compaction analysis |
-| **Session resume (close + reopen)** | Entire request reconstructed from persisted state | ~$3.75 | Session architecture |
-| **Cache TTL expiry (idle > 5min or > 1h)** | Server evicts cache entry | ~$3.75 on next request | XU() TTL logic |
+- **The CLI switches from "standard" to "tool-search" mode (or vice versa).** This restructures the entire tools array — ToolSearch gets added, deferred tools get removed or included differently.
 
-### No cache impact
+**How much does it cost?** At 200k context with 1h TTL: the server writes ~200k tokens at $2.00/MTok ($0.40) instead of reading them at $0.10/MTok ($0.02). You pay an extra **~$0.38 per occurrence**. At 500k context: **~$0.95 per occurrence**.
 
-| Scenario | Why it's safe | Evidence |
-|----------|--------------|----------|
-| **Discovering MCP tool via ToolSearch** | defer_loading excludes from prefix | This report |
-| **Using Skill tool** | Skill content appended to messages (end of prefix), doesn't change tools or system | Skill architecture |
-| **Reading files (Read tool)** | Output goes into messages, breakpoint slides normally | Normal operation |
-| **Multiple ToolSearch calls in sequence** | Each discovery adds defer_loading tools; prefix unchanged | defer_loading mechanism |
+### The moderate ones: system prompt and messages rewrite, tools survive
 
-### Cost estimation formula
+These change the system prompt (position 1), so the tools layer stays cached, but system + all messages get rewritten.
 
-For any cache invalidation event, the cost depends on what gets rebuilt:
+**When does this happen?**
 
-```
-Full prefix rebuild cost = (tools_tokens + system_tokens + messages_tokens) × write_rate
-System rebuild cost     = (system_tokens + messages_tokens) × write_rate
-Messages rebuild cost   = (new_message_tokens) × write_rate
+- **The date rolls over.** The system prompt includes `currentDate`. At midnight, this string changes, and the dynamic zone of the system prompt no longer matches. If you're working across midnight, you eat one rebuild.
 
-Where:
-  write_rate = $1.25 per MTok (5m TTL) or $2.00 per MTok (1h TTL) for cache writes
-  read_rate  = $0.10 per MTok for cache hits
+- **You edit CLAUDE.md during a conversation.** CLAUDE.md content is part of the system prompt. Every save triggers a rebuild. If your editor auto-saves frequently, this adds up.
 
-Cost difference per bust = rebuild_cost - (what_would_have_been_read × read_rate)
-                         ≈ context_tokens × (write_rate - read_rate)
-```
+- **Git status changes between turns.** The system prompt's dynamic zone includes a snapshot of your repo's git status. Run `git commit` between two Claude turns and the status string changes.
 
-At 200k context tokens with 1h TTL:
-- Full rebuild: 200k × $2.00/MTok = $0.40 (write cost)
-- What you'd have paid with cache hit: 200k × $0.10/MTok = $0.02 (read cost)
-- **Net cost of one cache bust: ~$0.38**
+- **A non-deferred MCP tool appears for the first time.** This triggers the system prompt cache strategy to downgrade from `"global"` scope to `"org"` scope. The scope change means the old cache entry no longer matches, so a new one gets written.
 
-At 500k context tokens with 1h TTL:
-- **Net cost of one cache bust: ~$0.95**
+**How much does it cost?** Slightly less than a full rebuild since tools remain cached. At 200k context where tools account for ~15k tokens: you save ~15k tokens of write cost compared to a full rebuild. In practice, **~$0.35 per occurrence** at 200k context.
 
-These numbers are per-bust. In a long conversation with frequent busts (e.g., CLAUDE.md auto-saves, git operations between turns), costs compound.
+### The cheap ones: just new messages get written
+
+This is normal operation. Every time you send a message and Claude responds, the new content gets written to cache. The sliding window breakpoint moves forward, and everything before it is read from cache.
+
+- **Normal conversation turns** — each turn adds new message content. Only the new part is a write. Everything before it is a read. This is the baseline cost of having a conversation.
+
+- **Tool outputs (Read, Bash, etc.)** — the output lands in the messages layer. Large outputs (e.g., reading a 5000-line file) mean more write tokens for that turn, but nothing gets invalidated.
+
+**How much does it cost?** Proportional to the new content. A typical turn with a few hundred tokens of user input + a few thousand tokens of Claude output: negligible.
+
+### The big ones: entire context rebuilt from scratch
+
+These are rare but the most expensive when they happen.
+
+- **Context compaction (auto-compact).** When the conversation exceeds the context limit, Claude Code summarizes older messages. The summarized content replaces the originals, which changes the messages layer entirely. Worse: if compaction changes the message that had the cache breakpoint, it can trigger a chain reaction where the system prompt's breakpoint also needs rebuilding.
+
+- **Session resume (close and reopen).** The entire request is reconstructed from persisted state. There's no warm cache to hit — everything is a write on the first turn back.
+
+- **Idle timeout (cache TTL expires).** If you don't send a message for 5 minutes (standard) or 1 hour (extended TTL), the server evicts your cache entry. Your next message pays the full write cost.
+
+**How much does it cost?** Same as a full rebuild — the entire context is written at the elevated rate. At 200k context with 1h TTL: **~$0.38**. But the real danger with compaction is that it can happen repeatedly if the conversation stays near the context limit, compounding the cost.
+
+### The free ones: no cache impact at all
+
+These are safe. Do them as much as you want.
+
+- **Discovering an MCP tool via ToolSearch.** The core finding of this report. Deferred tools are excluded from the server's prefix calculation. Discover 10 MCP tools in a row — zero cache impact.
+
+- **Using the Skill tool (/slash commands).** Skill content is appended to the messages layer at the current turn position. It doesn't modify tools or system prompt. Prior cache entries are untouched.
+
+- **Reading files, running commands, writing code.** All tool outputs go into the messages layer. The sliding window handles them normally.
+
+- **Multiple ToolSearch calls in sequence.** Each one adds a `defer_loading` tool to the client-side array, but the server ignores them all in prefix calculation.
+
+### Quick reference card
+
+| What you're doing | Cache impact | Extra cost per occurrence (200k context, 1h TTL) |
+|-------------------|-------------|--------------------------------------------------|
+| Normal conversation | None (baseline) | — |
+| Using ToolSearch to load MCP tools | None | $0 |
+| Using Skills (/slash commands) | None | $0 |
+| Reading files, running Bash | None (just new content) | — |
+| Date rollover (midnight) | System + messages rebuild | ~$0.35 |
+| Editing CLAUDE.md | System + messages rebuild | ~$0.35 |
+| Git operations between turns | System + messages rebuild | ~$0.35 |
+| Switching models | Full rebuild | ~$0.38 |
+| MCP server restart (descriptions changed) | Full rebuild | ~$0.38 |
+| Idle > 5min (or >1h with extended TTL) | Full rebuild on next turn | ~$0.38 |
+| Session close + resume | Full rebuild | ~$0.38 |
+| Auto-compact triggered | Full rebuild + chain risk | ~$0.38+ |
+
+For API billing users, these costs are direct charges. For Claude Max subscribers, they translate to faster consumption of your 5-hour rolling quota — the percentage impact depends on your total budget, but the relative proportions are the same.
 
 ---
 
