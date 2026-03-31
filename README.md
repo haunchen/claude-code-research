@@ -2,14 +2,21 @@
 
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-Independent research on Claude Code internals. This repository contains two bodies of work:
+Independent research on Claude Code internals.
 
-1. **[Source Code Analysis](#source-code-analysis)** — 75 reports from the leaked v2.1.88 TypeScript source (~92,500 lines)
-2. **[Behavioral Reports](#behavioral-reports)** — 8 focused investigations based on the minified npm bundle
+## What's in this repo
+
+| Directory | What | Source | Count |
+|-----------|------|--------|-------|
+| [`source-code-analysis/`](./source-code-analysis/) | Full architecture reverse-engineering | Leaked TypeScript source (v2.1.88) | **75 reports** |
+| [`reports/`](./reports/) | Problem-oriented investigations (cache, cost, injection) | Minified npm bundle (`cli.js`) | **8 reports** |
+
+> **Looking for the source code analysis?** Go to [`source-code-analysis/`](./source-code-analysis/).
+> **Looking for specific bug/cost investigations?** Go to [`reports/`](./reports/).
 
 ---
 
-## Source Code Analysis
+## Source Code Analysis (`source-code-analysis/`)
 
 On 2026-03-31, the full source code of Claude Code was exposed via a sourcemap file in the npm registry ([discovered by Chaofan Shou](https://x.com/shoucccc), archived by [Kuberwastaken](https://github.com/Kuberwastaken/claude-code) and [sanbuphy](https://github.com/sanbuphy/claude-code-source-code)).
 
@@ -36,7 +43,7 @@ Interactive viewer — open `source-code-analysis/index.html` in your browser (a
 
 ---
 
-## Behavioral Reports
+## Behavioral Reports (`reports/`)
 
 Problem-oriented investigations based on reverse engineering the minified `cli.js` from npm. Each includes English and Chinese versions.
 
@@ -57,6 +64,13 @@ Problem-oriented investigations based on reverse engineering the minified `cli.j
 
 - [CLI Reverse Engineering Guide](./research/cli-reverse-engineering-guide.md) — search patterns & function locators for minified cli.js
 - [Analysis Plan](./source-code-analysis/ANALYSIS-PLAN.md) — methodology for the 10-phase source code analysis
+
+## Source Code Archives
+
+The analysis is based on the full TypeScript source of Claude Code v2.1.88. The source code itself is not included in this repo. Community archives:
+
+- [Kuberwastaken/claude-code](https://github.com/Kuberwastaken/claude-code) — source code breakdown & analysis
+- [sanbuphy/claude-code-source-code](https://github.com/sanbuphy/claude-code-source-code) — source code archive
 
 ## Version Baseline
 
