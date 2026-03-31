@@ -1,69 +1,80 @@
 # Claude Code Research
 
-[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-Independent research on Claude Code internals, Claude Agent SDK, and related tooling. All findings are based on reverse engineering the publicly distributed npm packages.
+Independent research on Claude Code internals. This repository contains two bodies of work:
 
-Each report includes both English and Chinese versions.
+1. **[Source Code Analysis](#source-code-analysis)** — 75 reports from the leaked v2.1.88 TypeScript source (~92,500 lines)
+2. **[Behavioral Reports](#behavioral-reports)** — 8 focused investigations based on the minified npm bundle
 
-## Why This Exists
+---
 
-Over **30 open GitHub issues** document unexplained token waste, security concerns, and architectural problems in Claude Code — many with dozens of comments and no official response. This repository provides the technical root-cause analysis that the community has been asking for, along with working solutions.
+## Source Code Analysis
 
-## Reports
+On 2026-03-31, the full source code of Claude Code was exposed via a sourcemap file in the npm registry ([discovered by Chaofan Shou](https://x.com/shoucccc), archived by [Kuberwastaken](https://github.com/Kuberwastaken/claude-code) and [sanbuphy](https://github.com/sanbuphy/claude-code-source-code)).
 
-| # | Topic | Description |
-|---|-------|-------------|
-| 1 | [Agent SDK Cache Invalidation](./reports/agent-sdk-cache-invalidation/) | Why Agent SDK V1 `query()` costs 3–10x more than CLI per message — prompt cache invalidation caused by process-per-call architecture. Fix: V2 persistent session + SDK patch. |
-| 2 | [System-Reminder Injection](./reports/system-reminder-injection/) | Complete reverse-engineering of the `<system-reminder>` injection mechanism — 15+ hidden injection types, the readFileState tracking system, 4 root-cause bugs, and why the Agent SDK triggers injection on every single turn. |
-| 3 | [Prompt Cache Architecture](./reports/prompt-cache-architecture/) | How Claude Code controls what gets cached and for how long — the single `cache_control` factory (`Ml()`), per-model disable gates, server-side 1h TTL gating via feature flag allowlist, system prompt static/dynamic zone split, message-level sliding window, and why byte-for-byte prefix matching makes injection order critical. |
-| 4 | [Tool Serialization & Cache Stability](./reports/tool-serialization-cache-stability/) | The 4-stage tool pipeline, why there is zero `.sort()` on tool arrays, how deferred tool loading silently busts the cache mid-conversation, and MCP tool description dynamism as a hidden instability source. |
-| 5 | [Context Lifecycle Management](./reports/context-lifecycle-management/) | How Claude Code decides when to compress context — 5 hardcoded threshold constants, the 10-step compaction flow, preserved message segments, the `currentDate` daily cache-kill problem, and compact chain reactions that compound cache rebuild costs. |
-| 6 | [Production Cache Optimization](./reports/production-cache-optimization/) | Concrete, tested patches and strategies for maximizing prompt cache efficiency — 3 cli.js patches (context margin, 1h TTL force, compaction threshold), cache keepalive, tool ordering stabilization, efficiency monitoring, and the postinstall patch delivery pattern. |
-| 7 | [Cache Invalidation Verification](./reports/cache-invalidation-verification/) | Why MCP tool discovery via ToolSearch doesn't bust the prompt cache — the `defer_loading` flag excludes deferred tools from the cache prefix entirely. Verified through source code, official docs, GitHub issues, and live experiment. Includes complete cache breakpoint map, three system prompt cache strategies, and a practical scenario guide for every operation that does or doesn't invalidate cache. |
-| 8 | [Auto Mode Classifier Cost](./reports/auto-mode-classifier-cost/) | Auto Mode makes a hidden Opus-level API call before every side-effecting tool use. The classifier receives the full condensed conversation history, only fixed portions benefit from caching, and a Statsig flag can silently double the calls. Includes complete flow, cost estimation, cache analysis, and 4 mitigation options. |
+We performed a 10-domain, 75-report analysis — the most thorough publicly available breakdown of how a production AI coding agent works.
 
-## Related Issues
+**[Browse all reports →](./source-code-analysis/)**
 
-### Token Waste
-- [anthropics/claude-code#16021](https://github.com/anthropics/claude-code/issues/16021) — File modification reminders injected every message (23 comments)
-- [anthropics/claude-code#4464](https://github.com/anthropics/claude-code/issues/4464) — system-reminder consuming too many context tokens (22 comments)
-- [anthropics/claude-code#17601](https://github.com/anthropics/claude-code/issues/17601) — 10,000+ hidden injections consuming 15%+ context
-- [anthropics/claude-code#27599](https://github.com/anthropics/claude-code/issues/27599) — Infinite system-reminder repetition in headless mode
+Interactive viewer — open `source-code-analysis/index.html` in your browser (all 75 reports are embedded, no server needed).
 
-### Security / Trust
-- [anthropics/claude-code#18560](https://github.com/anthropics/claude-code/issues/18560) — system-reminder instructs Claude to ignore CLAUDE.md
-- [anthropics/claude-code#31447](https://github.com/anthropics/claude-code/issues/31447) — Claude social-engineers users into relaxing permissions
-- [anthropics/claude-code#23537](https://github.com/anthropics/claude-code/issues/23537) — System reminders disguised as user input
-- [anthropics/claude-code#27128](https://github.com/anthropics/claude-code/issues/27128) — System messages mislabeled as Human: turn
+### Key Findings
 
-### SDK / Architecture
-- [anthropics/claude-agent-sdk-typescript#188](https://github.com/anthropics/claude-agent-sdk-typescript/issues/188) — SDK defaults to 1h cache TTL (2x write cost)
-- [anthropics/claude-code#9769](https://github.com/anthropics/claude-code/issues/9769) — Request for system-reminder toggle (open since 2025-10)
-- [anthropics/claude-code#30730](https://github.com/anthropics/claude-code/issues/30730) — Sub-agent injection overrides custom agent definitions
+| Domain | Reports | Highlights |
+|--------|---------|------------|
+| [Harness Engineering](./source-code-analysis/phase-09-harness-engineering/) ⭐ | 7 | Agent Loop reverse-engineering, 12 transferable harness design principles |
+| [System Prompt](./source-code-analysis/phase-01-system-prompt/) ⭐ | 6 | Complete 13-section prompt with dynamic assembly logic, 17 prompt engineering patterns |
+| [Cost & Quota](./source-code-analysis/phase-10-cost-quota/) ⭐ | 8 | Cost envelope, prompt cache break detection (12 causes), Haiku→Opus 37.5x cost gap |
+| [Tool Definitions](./source-code-analysis/phase-02-tool-definitions/) | 8 | All 36 tool prompts, read/write concurrency separation, ant vs public prompt variants |
+| [Agent Architecture](./source-code-analysis/phase-03-agent-architecture/) | 7 | 6 built-in agents, Coordinator mode, Swarm multi-agent, 50-message cap (from 36.8GB incident) |
+| [Security](./source-code-analysis/phase-06-security-permissions/) | 8 | 7-layer defense-in-depth, 23 Bash validators, Parser Differential threat model |
+| [Skills System](./source-code-analysis/phase-04-skills-system/) | 5 | 16 bundled skills, 12 design patterns + 5 anti-patterns |
+| [Memory & Context](./source-code-analysis/phase-05-memory-context/) | 9 | 6 memory subsystems, AutoDream consolidation, Team Memory dual-layer security |
+| [API & Models](./source-code-analysis/phase-07-api-model-architecture/) | 7 | 17 beta headers, 4 providers, model selection 5-layer priority |
+| [Hidden Features](./source-code-analysis/phase-08-special-features/) | 10 | 82 feature flags, KAIROS proactive mode, Buddy AI pet, UltraPlan, anti-distillation |
 
-## SDK Version Baseline
+---
 
-Reports #1–2 are based on `@anthropic-ai/claude-code` v2.1.71. Reports #3–6 are based on `@anthropic-ai/claude-agent-sdk` v0.2.76 (cli.js build 2026-03-14). Report #7 is based on `@anthropic-ai/claude-code` v2.1.85 (cli.js build 2026-03-26). Report #8 is based on `@anthropic-ai/claude-code` v2.1.88 (cli.js build 2026-03-30). Findings may change with future SDK updates.
+## Behavioral Reports
+
+Problem-oriented investigations based on reverse engineering the minified `cli.js` from npm. Each includes English and Chinese versions.
+
+| # | Topic | TL;DR |
+|---|-------|-------|
+| 1 | [Agent SDK Cache Invalidation](./reports/agent-sdk-cache-invalidation/) | SDK `query()` costs 3–10x more than CLI — process-per-call kills prompt cache |
+| 2 | [System-Reminder Injection](./reports/system-reminder-injection/) | 15+ hidden injection types, 4 root-cause bugs |
+| 3 | [Prompt Cache Architecture](./reports/prompt-cache-architecture/) | Static/dynamic zone split, sliding window, byte-prefix matching |
+| 4 | [Tool Serialization & Cache Stability](./reports/tool-serialization-cache-stability/) | Zero `.sort()` on tools, deferred loading busts cache mid-conversation |
+| 5 | [Context Lifecycle Management](./reports/context-lifecycle-management/) | 5 threshold constants, 10-step compaction flow, chain reactions |
+| 6 | [Production Cache Optimization](./reports/production-cache-optimization/) | 3 concrete cli.js patches + monitoring strategies |
+| 7 | [Cache Invalidation Verification](./reports/cache-invalidation-verification/) | `defer_loading` excludes deferred tools from cache prefix entirely |
+| 8 | [Auto Mode Classifier Cost](./reports/auto-mode-classifier-cost/) | Hidden Opus-level call before every side-effecting tool use |
+
+---
+
+## Resources
+
+- [CLI Reverse Engineering Guide](./research/cli-reverse-engineering-guide.md) — search patterns & function locators for minified cli.js
+- [Analysis Plan](./source-code-analysis/ANALYSIS-PLAN.md) — methodology for the 10-phase source code analysis
+
+## Version Baseline
+
+| Scope | Version |
+|-------|---------|
+| Source Code Analysis | v2.1.88 (sourcemap leak, 2026-03-31) |
+| Behavioral Reports #1–2 | v2.1.71 |
+| Behavioral Reports #3–6 | Agent SDK v0.2.76 (build 2026-03-14) |
+| Behavioral Reports #7–8 | v2.1.85 / v2.1.88 |
 
 ## How to Cite
-
-If you reference this research in blog posts, articles, or other projects:
 
 ```
 CabLate, "Claude Code Research," GitHub, 2026.
 https://github.com/cablate/claude-code-research
 ```
 
-## Contributing
-
-We welcome new research findings, corrections, and updates. See [CONTRIBUTING.md](./CONTRIBUTING.md) for submission guidelines, quality standards, and the report structure template.
-
 ## Disclaimer
 
-This is independent research. It is **not affiliated with, endorsed by, or sponsored by Anthropic**. All analysis is performed on publicly distributed npm packages. No proprietary source code is reproduced.
+This is independent research, **not affiliated with or endorsed by Anthropic**. Behavioral reports analyze publicly distributed npm packages. Source code analysis is based on code exposed through npm registry sourcemaps.
 
-## License
-
-[CC-BY-4.0](./LICENSE) — You are free to share and adapt this material with appropriate attribution.
