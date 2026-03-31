@@ -67,8 +67,9 @@ Problem-oriented investigations based on reverse engineering the minified `cli.j
 
 ## Source Code Archives
 
-The analysis is based on the full TypeScript source of Claude Code v2.1.88. The source code itself is not included in this repo. Community archives:
+The analysis is based on the full TypeScript source of Claude Code v2.1.88. The source code itself is not included in this repo.
 
+- [chatgptprojects/claude-code](https://github.com/chatgptprojects/claude-code) — full source code
 - [Kuberwastaken/claude-code](https://github.com/Kuberwastaken/claude-code) — source code breakdown & analysis
 - [sanbuphy/claude-code-source-code](https://github.com/sanbuphy/claude-code-source-code) — source code archive
 
